@@ -52,33 +52,115 @@ alex/
 │   └── agent_architecture.md
 │
 ├── backend/             # Agent code and Lambda functions
-│   ├── planner/         # Orchestrator agent
+│   ├── planner/         # Orchestrator agent (SQS-triggered Lambda)
+│   │   ├── lambda_handler.py   # SQS event handler, runs orchestrator
+│   │   ├── agent.py            # PlannerContext, tools, create_agent()
+│   │   ├── templates.py        # ORCHESTRATOR_INSTRUCTIONS prompt
+│   │   ├── market.py           # Polygon.io price updates
+│   │   ├── observability.py    # LangFuse + Logfire integration
+│   │   ├── test_simple.py      # Local test with MOCK_LAMBDAS=true
+│   │   └── test_full.py        # AWS deployment test
+│   │
 │   ├── tagger/          # Instrument classification agent
-│   ├── reporter/        # Portfolio analysis agent
-│   ├── charter/         # Visualization agent
+│   │   ├── lambda_handler.py
+│   │   ├── agent.py            # Uses structured outputs (no tools)
+│   │   ├── templates.py
+│   │   ├── test_simple.py
+│   │   └── test_full.py
+│   │
+│   ├── reporter/        # Portfolio analysis narrative agent
+│   │   ├── lambda_handler.py
+│   │   ├── agent.py            # ReporterContext, get_market_insights tool
+│   │   ├── templates.py        # REPORTER_INSTRUCTIONS prompt
+│   │   ├── judge.py            # LLM-as-judge quality evaluation
+│   │   ├── test_simple.py
+│   │   └── test_full.py
+│   │
+│   ├── charter/         # Visualization data agent
+│   │   ├── lambda_handler.py
+│   │   ├── agent.py            # No tools - outputs JSON directly
+│   │   ├── templates.py        # CHARTER_INSTRUCTIONS + create_charter_task()
+│   │   ├── test_simple.py
+│   │   └── test_full.py
+│   │
 │   ├── retirement/      # Retirement projection agent
-│   ├── researcher/      # Market research agent (App Runner)
-│   ├── ingest/          # Document ingestion Lambda
-│   ├── database/        # Shared database library
-│   └── api/             # FastAPI backend for frontend
+│   │   ├── lambda_handler.py
+│   │   ├── agent.py            # Uses tools for calculations
+│   │   ├── templates.py
+│   │   ├── test_simple.py
+│   │   └── test_full.py
+│   │
+│   ├── researcher/      # Market research agent (App Runner, NOT Lambda)
+│   │   ├── server.py           # FastAPI app, REGION and MODEL hardcoded here
+│   │   ├── context.py          # Agent instructions and prompts
+│   │   ├── mcp_servers.py      # Playwright MCP server setup
+│   │   ├── tools.py            # ingest_financial_document tool
+│   │   ├── deploy.py           # Build and push Docker image to ECR
+│   │   ├── test_local.py       # Local testing
+│   │   └── test_research.py    # Research endpoint test
+│   │
+│   ├── ingest/          # Document ingestion Lambda (S3 Vectors)
+│   │   ├── ingest_s3vectors.py     # Lambda handler for ingestion
+│   │   ├── search_s3vectors.py     # Vector search utility
+│   │   ├── test_ingest_s3vectors.py
+│   │   └── test_search_s3vectors.py
+│   │
+│   ├── database/        # Shared database library (Aurora Data API)
+│   │   ├── src/
+│   │   │   ├── __init__.py         # Exports Database class
+│   │   │   ├── client.py           # DataAPIClient wrapping AWS RDS Data API
+│   │   │   ├── models.py           # Users, Instruments, Accounts, Positions, Jobs
+│   │   │   └── schemas.py          # Pydantic validation schemas
+│   │   ├── run_migrations.py       # Apply DB schema
+│   │   ├── seed_data.py            # Load 22 ETFs seed data
+│   │   ├── reset_db.py             # Drop and recreate tables
+│   │   └── verify_database.py      # Check DB connectivity
+│   │
+│   ├── api/             # FastAPI backend for frontend
+│   │   ├── main.py             # All REST endpoints + Mangum adapter
+│   │   ├── lambda_handler.py   # Lambda entry point
+│   │   └── package_docker.py   # Docker packaging for deployment
+│   │
+│   ├── scheduler/       # EventBridge scheduler Lambda
+│   │   └── lambda_function.py
+│   │
+│   ├── package_docker.py       # Master packaging script (all agents)
+│   ├── deploy_all_lambdas.py   # Deploy all Lambda functions
+│   ├── test_simple.py          # Top-level test (mocked)
+│   ├── test_full.py            # Top-level test (live AWS)
+│   ├── test_scale.py           # Load/scale testing
+│   ├── test_multiple_accounts.py
+│   ├── watch_agents.py         # Monitor agent execution
+│   ├── check_job_details.py    # Inspect job results in DB
+│   └── check_db.py             # Database inspection utility
 │
-├── frontend/            # NextJS React application
+├── frontend/            # NextJS React application (Pages Router)
 │   ├── pages/
-│   ├── components/
-│   └── lib/
+│   │   ├── index.tsx           # Landing page
+│   │   ├── dashboard.tsx       # Main dashboard with jobs list
+│   │   ├── analysis.tsx        # Portfolio analysis results
+│   │   ├── accounts.tsx        # Account management
+│   │   ├── accounts/[id].tsx   # Individual account positions
+│   │   ├── advisor-team.tsx    # AI agent team info page
+│   │   ├── _app.tsx            # App wrapper with Clerk provider
+│   │   ├── _document.tsx       # HTML document
+│   │   ├── 404.tsx             # Not found page
+│   │   └── 500.tsx             # Error page
+│   ├── components/             # Reusable React components
+│   └── lib/                    # Shared utilities/API client
 │
 ├── terraform/           # Infrastructure as Code (IMPORTANT: Independent directories)
 │   ├── 2_sagemaker/     # SageMaker embedding endpoint
 │   ├── 3_ingestion/     # S3 Vectors and ingest Lambda
 │   ├── 4_researcher/    # App Runner research service
 │   ├── 5_database/      # Aurora Serverless v2
-│   ├── 6_agents/        # Multi-agent Lambda functions
+│   ├── 6_agents/        # Multi-agent Lambda functions (all 5 agents + API)
 │   ├── 7_frontend/      # CloudFront, S3, API Gateway
 │   └── 8_enterprise/    # CloudWatch dashboards and monitoring
 │
 └── scripts/             # Deployment and local development scripts
-    ├── deploy.py        # Frontend deployment
-    ├── run_local.py     # Local development
+    ├── deploy.py        # Frontend deployment to S3/CloudFront
+    ├── run_local.py     # Run frontend + backend locally (parallel)
     └── destroy.py       # Cleanup script
 ```
 
@@ -115,7 +197,7 @@ alex/
   - Use AWS Bedrock with Nova Pro model
   - Integrate Playwright MCP server for web browsing
   - Set up EventBridge scheduler (optional)
-  - **IMPORTANT**: Update `backend/researcher/server.py` with your region and model
+  - **IMPORTANT**: `backend/researcher/server.py` has hardcoded REGION and MODEL variables that students must update
 
 ### Week 4: Portfolio Management Platform
 
@@ -289,7 +371,24 @@ If `terraform.tfvars` is missing or misconfigured:
 - Students can `terraform destroy` each directory independently
 - If a student loses state, they may need to import existing resources or recreate
 
-## Agent strategy - background on OpenAI Agents SDK
+### Key Terraform Variables (Guide 6 - Agents)
+
+The `terraform/6_agents/variables.tf` requires these inputs:
+- `aws_region` - Deployment region
+- `aurora_cluster_arn` - From Guide 5 terraform output
+- `aurora_secret_arn` - From Guide 5 terraform output
+- `vector_bucket` - S3 Vectors bucket name from Guide 3
+- `bedrock_model_id` - e.g. `us.amazon.nova-pro-v1:0`
+- `bedrock_region` - Region for Bedrock calls
+- `sagemaker_endpoint` - Default: `alex-embedding-endpoint`
+- `polygon_api_key` - Polygon.io API key for market data
+- `polygon_plan` - `free` or `paid`
+- `langfuse_public_key` / `langfuse_secret_key` / `langfuse_host` - Optional observability
+- `openai_api_key` - Required for OpenAI Agents SDK tracing (even when using Bedrock)
+
+---
+
+## Agent Strategy - Background on OpenAI Agents SDK
 
 Each Agent subdirectory has a common structure with idiomatic patterns.
 
@@ -305,62 +404,403 @@ Alex makes standard use of LiteLLM to connect to Bedrock:
 
 Structured outputs and Tool calling is frequently used, but due to a current limitation with LiteLLM and Bedrock, the same Agent cannot use both Structured Outputs and Tool calling. So each Agent implementation either uses Structured Outputs OR uses Tools, never both.
 
-This is the standard idiomatic approach used in lambda_handler:
+### Agent Patterns by Type
+
+**Pattern 1 - Tools with Context (Reporter, Planner)**
+
+Used when the agent needs database access via tools and needs to know the current user:
 
 ```python
-    # Create agent - imported from agents.py
-    model, tools, task = create_agent(job_id, portfolio_data, user_preferences, db)
-    
-    # Run agent
-    with trace("Retirement Agent"):
-        agent = Agent(
-            name="Retirement Specialist",
-            instructions=RETIREMENT_INSTRUCTIONS,
-            model=model,
-            tools=tools
-        )
-        
-        result = await Runner.run(
-            agent,
-            input=task,
-            max_turns=20
-        )
-
-        response = result.final_output
-```
-
-In cases where a Tool needs to know which user is logged in to make the right database call, we use a standard, idomatic approach for passing context in to the tool which works very well and is recommended by OpenAI Agents SDK. 
-
-```python
-
 with trace("Reporter Agent"):
-        agent = Agent[ReporterContext](  # Specify the context type
-            name="Report Writer", instructions=REPORTER_INSTRUCTIONS, model=model, tools=tools
-        )
+    agent = Agent[ReporterContext](  # Specify the context type
+        name="Report Writer", instructions=REPORTER_INSTRUCTIONS, model=model, tools=tools
+    )
 
-        result = await Runner.run(
-            agent,
-            input=task,
-            context=context,  # Pass the context
-            max_turns=10,
-        )
+    result = await Runner.run(
+        agent,
+        input=task,
+        context=context,  # Pass the context
+        max_turns=10,
+    )
 
-        response = result.final_output
-
+    response = result.final_output
 ```
-And later:
+
+And in tools:
 ```python
 @function_tool
 async def get_market_insights(
     wrapper: RunContextWrapper[ReporterContext], symbols: List[str]
 ) -> str:
-...
+    ...
 ```
 
-IMPORTANT: when using Bedrock through LiteLLM, LiteLLM needs this environment variable set:   
-`os.environ["AWS_REGION_NAME"] = bedrock_region`  
+**Pattern 2 - Structured Output (Tagger)**
+
+Used when the agent must return a strongly-typed response (no tools):
+
+```python
+result = await Runner.run(
+    agent,
+    input=task,
+    max_turns=10,
+)
+response = result.final_output  # Returns the structured Pydantic model
+```
+
+**Pattern 3 - Tools without Context (Retirement)**
+
+Used when the agent uses tools but doesn't need per-user context passed through:
+
+```python
+with trace("Retirement Agent"):
+    agent = Agent(
+        name="Retirement Specialist",
+        instructions=RETIREMENT_INSTRUCTIONS,
+        model=model,
+        tools=tools
+    )
+
+    result = await Runner.run(
+        agent,
+        input=task,
+        max_turns=20
+    )
+
+    response = result.final_output
+```
+
+**Pattern 4 - Direct JSON Output (Charter)**
+
+Used when the agent outputs structured data but LiteLLM/Bedrock structured output is unreliable:
+
+```python
+# No tools, no context - agent outputs JSON string directly
+model, task = create_agent(job_id, portfolio_data, db)
+
+agent = Agent(
+    name="Chart Maker",
+    instructions=CHARTER_INSTRUCTIONS,
+    model=model,
+)
+
+result = await Runner.run(agent, input=task, max_turns=10)
+# Parse the JSON from result.final_output in lambda_handler
+```
+
+### Rate Limiting with Tenacity
+
+The Planner uses tenacity for automatic retry on rate limit errors:
+
+```python
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from litellm.exceptions import RateLimitError
+
+@retry(
+    retry=retry_if_exception_type(RateLimitError),
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=4, max=60),
+    before_sleep=lambda retry_state: logger.info(f"Rate limit hit, retrying...")
+)
+async def run_orchestrator(job_id: str) -> None:
+    ...
+```
+
+### IMPORTANT: LiteLLM Region Configuration
+
+When using Bedrock through LiteLLM, LiteLLM needs this environment variable set:
+```python
+os.environ["AWS_REGION_NAME"] = bedrock_region
+```
 This is confusing as other services sometimes expect `"AWS_REGION"` or `"DEFAULT_AWS_REGION"`. But LiteLLM needs `AWS_REGION_NAME` as documented here: https://docs.litellm.ai/docs/providers/bedrock.
 
+This is set in `create_agent()` in each agent's `agent.py`:
+```python
+bedrock_region = os.getenv("BEDROCK_REGION", "us-west-2")
+os.environ["AWS_REGION_NAME"] = bedrock_region
+```
+
+---
+
+## Agent Reference Guide
+
+### Planner (Orchestrator)
+- **Trigger**: SQS message with `job_id`
+- **Pattern**: Tools + PlannerContext
+- **Tools**: `invoke_reporter`, `invoke_charter`, `invoke_retirement`
+- **Pre-processing**: Calls Tagger directly (not via agent tool), updates market prices via Polygon.io
+- **Key files**: `lambda_handler.py`, `agent.py`, `market.py`, `observability.py`
+- **Retry**: Uses tenacity for RateLimitError (5 attempts, exponential backoff)
+- **Observability**: LangFuse via `observe()` context manager (requires `LANGFUSE_SECRET_KEY`)
+
+### Tagger (Instrument Classifier)
+- **Trigger**: Direct Lambda invocation from Planner with `{"instruments": [...]}`
+- **Pattern**: Structured outputs (no tools)
+- **Purpose**: Tags ETF/stock instruments with allocation data (regions, sectors, asset classes)
+- **Key files**: `lambda_handler.py`, `agent.py`, `templates.py`
+
+### Reporter (Portfolio Analyst)
+- **Trigger**: Lambda invocation from Planner with `{"job_id": "..."}`
+- **Pattern**: Tools + ReporterContext
+- **Tools**: `get_market_insights` (queries S3 Vectors via SageMaker embeddings)
+- **Output**: Markdown report saved to `jobs.report_payload`
+- **Key files**: `lambda_handler.py`, `agent.py`, `judge.py` (LLM quality evaluation)
+
+### Charter (Visualization)
+- **Trigger**: Lambda invocation from Planner with `{"job_id": "..."}`
+- **Pattern**: Direct JSON output (no tools, no context)
+- **Output**: Chart data JSON saved to `jobs.charts_payload`
+- **Key files**: `lambda_handler.py`, `agent.py` (includes `analyze_portfolio()` preprocessing)
+
+### Retirement (Projection Specialist)
+- **Trigger**: Lambda invocation from Planner with `{"job_id": "..."}`
+- **Pattern**: Tools (no context needed)
+- **Output**: Retirement projections saved to `jobs.retirement_payload`
+- **Key files**: `lambda_handler.py`, `agent.py`, `templates.py`
+
+### Researcher (Market Research)
+- **Deployment**: App Runner (NOT Lambda) - long-running service
+- **Pattern**: FastAPI + OpenAI Agents SDK + Playwright MCP server
+- **Purpose**: Browses financial websites, ingests research into S3 Vectors
+- **Key files**: `server.py` (REGION and MODEL hardcoded - students must update), `mcp_servers.py`, `tools.py`
+- **Endpoints**: `GET /`, `POST /research`, `GET /research/auto`, `GET /health`, `GET /test-bedrock`
+- **Deployment**: `deploy.py` builds Docker image and pushes to ECR
+
+---
+
+## Database Architecture
+
+### Aurora Serverless v2 via Data API
+
+Alex uses Aurora PostgreSQL Serverless v2 with the RDS Data API enabled. This avoids VPC complexity - the Data API is accessed directly over HTTPS.
+
+### Database Models (`backend/database/src/`)
+
+**`client.py`** - `DataAPIClient` wrapping AWS RDS Data API
+- Methods: `execute()`, `query()`, `query_one()`, `insert()`, `update()`, `delete()`
+
+**`models.py`** - ORM-like model classes:
+- `Users` - `find_by_clerk_id()`, `create_user()`
+- `Instruments` - `find_by_symbol()`, `search()`, `find_by_type()`, all instruments ordered by symbol
+- `Accounts` - `find_by_user()`, `create_account()`
+- `Positions` - `find_by_account()` (JOIN with instruments), `add_position()` (UPSERT), `get_portfolio_value()`
+- `Jobs` - `create_job()`, `update_status()`, `update_report()`, `update_charts()`, `update_retirement()`, `update_summary()`, `find_by_user()`
+- `Database` - Main interface instantiating all models: `db.users`, `db.instruments`, `db.accounts`, `db.positions`, `db.jobs`
+
+**`schemas.py`** - Pydantic validation schemas:
+- `InstrumentCreate`, `UserCreate`, `AccountCreate`, `PositionCreate`, `JobCreate`, `JobUpdate`
+- `JobType`, `JobStatus` enums
+
+### Jobs Table Structure
+
+The `jobs` table is the central result store:
+- `report_payload` - Reporter agent output (markdown narrative)
+- `charts_payload` - Charter agent output (visualization JSON)
+- `retirement_payload` - Retirement agent output (projections)
+- `summary_payload` - Planner's final summary
+- `status` - `pending` → `running` → `completed` / `failed`
+
+### Connecting to Database
+
+```python
+from src import Database
+
+db = Database()  # Reads env vars: AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, DATABASE_NAME, DEFAULT_AWS_REGION
+```
+
+---
+
+## FastAPI Backend (API)
+
+Location: `backend/api/main.py`
+
+The API uses `mangum` as an ASGI adapter for Lambda deployment and `fastapi-clerk-auth` for JWT validation.
+
+### Authentication
+
+All routes (except `/health`) require Clerk JWT via `ClerkHTTPBearer`:
+```python
+clerk_config = ClerkConfig(jwks_url=os.getenv("CLERK_JWKS_URL"))
+clerk_guard = ClerkHTTPBearer(clerk_config)
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check (unauthenticated) |
+| GET | `/api/user` | Get or create user (auto-creates on first login) |
+| PUT | `/api/user` | Update user settings (retirement goals, targets) |
+| GET | `/api/accounts` | List user's accounts |
+| POST | `/api/accounts` | Create new account |
+| PUT | `/api/accounts/{id}` | Update account |
+| DELETE | `/api/accounts/{id}` | Delete account (cascades positions) |
+| GET | `/api/accounts/{id}/positions` | List positions with instrument data |
+| POST | `/api/positions` | Add position (auto-creates instrument if unknown) |
+| PUT | `/api/positions/{id}` | Update position quantity |
+| DELETE | `/api/positions/{id}` | Delete position |
+| GET | `/api/instruments` | All instruments (for autocomplete) |
+| POST | `/api/analyze` | Trigger portfolio analysis (creates Job, sends to SQS) |
+| GET | `/api/jobs/{id}` | Get job status and results |
+| GET | `/api/jobs` | List user's jobs |
+| DELETE | `/api/reset-accounts` | Delete all accounts for user |
+| POST | `/api/populate-test-data` | Create test portfolio with sample data |
+
+### Key Behaviors
+- `POST /api/positions`: If instrument symbol is unknown, auto-creates it with default allocations (will be properly tagged by Tagger agent later)
+- `POST /api/analyze`: Creates a job record and sends to SQS queue; Planner Lambda is triggered
+- User creation: First call to `GET /api/user` creates the user with defaults (20yr retirement, $60k income target)
+- CORS: `cors_origins` from env var `CORS_ORIGINS` (comma-separated), defaults to `http://localhost:3000`
+
+---
+
+## Frontend Architecture (NextJS)
+
+Location: `frontend/`
+
+**Framework**: NextJS with Pages Router (required for Clerk authentication)
+**Authentication**: Clerk
+**Deployment**: Static site on S3 + CloudFront CDN
+
+### Pages
+
+| Page | Route | Description |
+|------|-------|-------------|
+| Landing | `/` | Marketing/intro page |
+| Dashboard | `/dashboard` | Jobs list, trigger analysis |
+| Analysis | `/analysis` | View analysis results (report, charts, retirement) |
+| Accounts | `/accounts` | Account management |
+| Account Detail | `/accounts/[id]` | Positions for a specific account |
+| Advisor Team | `/advisor-team` | Info about the AI agent team |
+
+### Configuration
+- `frontend/.env.local` - Clerk public key and API URL
+- API calls go through CloudFront → API Gateway → Lambda (api)
+
+---
+
+## Observability (LangFuse + Logfire)
+
+Location: `backend/planner/observability.py` (also in other agent directories)
+
+Each agent has an `observability.py` with an `observe()` context manager:
+
+```python
+from observability import observe
+
+with observe():
+    # Agent runs here - traces sent to LangFuse if configured
+    result = await Runner.run(agent, input=task, ...)
+```
+
+**How it works**:
+1. Checks for `LANGFUSE_SECRET_KEY` env var - skips silently if not set
+2. Configures `logfire` to instrument OpenAI Agents SDK (without sending to Logfire cloud)
+3. `logfire.instrument_openai_agents()` captures all agent traces
+4. LangFuse receives traces via OTLP exporter
+5. On exit, flushes and waits 15 seconds (Lambda termination workaround)
+
+**Required env vars** (optional - observability is disabled if missing):
+- `LANGFUSE_SECRET_KEY`
+- `LANGFUSE_PUBLIC_KEY`
+- `LANGFUSE_HOST` (default: `https://us.cloud.langfuse.com`)
+- `OPENAI_API_KEY` - Required for OpenAI Agents SDK tracing even when using Bedrock
+
+---
+
+## Market Data (Polygon.io)
+
+Location: `backend/planner/market.py`
+
+The Planner calls `update_instrument_prices()` before running agents to fetch fresh prices from Polygon.io.
+
+**Required env vars**:
+- `POLYGON_API_KEY` - API key from polygon.io
+- `POLYGON_PLAN` - `free` (rate limited) or `paid`
+
+---
+
+## Researcher Service Details
+
+Location: `backend/researcher/`
+
+The Researcher is deployed on **App Runner** (not Lambda) because it:
+- Uses Playwright browser automation (needs persistent process)
+- Has longer execution times (web browsing takes time)
+- Uses MCP (Model Context Protocol) with Playwright
+
+### Key Configuration in `server.py`
+
+```python
+# Students MUST update these:
+REGION = "us-east-1"                          # Your AWS region
+MODEL = "bedrock/us.amazon.nova-pro-v1:0"     # Nova Pro (must support tools/MCP)
+```
+
+**Note**: Nova Pro is required (not Nova Lite) because MCP tools need a capable model.
+
+### MCP Integration (`mcp_servers.py`)
+
+Uses `agents.mcp.MCPServerStdio` to connect to Playwright MCP server for web browsing:
+```python
+async with create_playwright_mcp_server(timeout_seconds=60) as playwright_mcp:
+    agent = Agent(
+        name="Alex Investment Researcher",
+        ...
+        mcp_servers=[playwright_mcp],
+    )
+```
+
+### Deployment (`deploy.py`)
+
+1. Builds Docker image for linux/amd64 (App Runner requirement)
+2. Pushes to ECR
+3. App Runner pulls and deploys automatically
+
+---
+
+## Local Development
+
+### Running Locally
+
+```bash
+# From project root
+uv run scripts/run_local.py
+```
+
+This starts:
+- FastAPI backend at `http://localhost:8000` (via `uv run main.py` in `backend/api/`)
+- NextJS frontend at `http://localhost:3000`
+- API docs at `http://localhost:8000/docs`
+
+**Prerequisites**:
+- `.env` file in project root with all backend variables
+- `frontend/.env.local` with Clerk keys
+
+### Testing Agents Locally
+
+```bash
+# From the agent directory (e.g., backend/planner/)
+MOCK_LAMBDAS=true uv run test_simple.py
+```
+
+With `MOCK_LAMBDAS=true`, Lambda invocations are mocked and return success without calling AWS.
+
+### Packaging Agents for Lambda
+
+Each agent directory has `package_docker.py`:
+```bash
+# From backend/planner/
+uv run package_docker.py
+```
+
+Or package all agents at once:
+```bash
+# From backend/
+uv run package_docker.py
+```
+
+**Requirements**: Docker Desktop must be running. Packages are built for `linux/amd64`.
 
 ---
 
@@ -457,6 +897,30 @@ The most common issues relate to AWS region choices! Check environment variables
 3. Run `terraform output` in `5_database` to get correct ARNs
 4. Update environment variables with actual ARNs
 
+### Issue 6: Researcher Hardcoded Region/Model
+
+**Symptoms**: Researcher uses wrong region or model, even though tfvars are correct
+
+**Root Cause**: `backend/researcher/server.py` has hardcoded `REGION` and `MODEL` variables
+
+**Solution**: Edit `server.py` directly:
+```python
+REGION = "your-region-here"        # e.g., "eu-central-1"
+MODEL = "bedrock/eu.amazon.nova-pro-v1:0"  # Match your region
+```
+Then redeploy via `deploy.py`.
+
+### Issue 7: Planner Runs But Sub-agents Not Called
+
+**Symptoms**: Job completes but no report/charts/retirement data saved
+
+**Root Cause**: Agent may have decided not to call tools, or Lambda invocations failed silently
+
+**Diagnosis**:
+1. Check CloudWatch logs for each Lambda (`alex-reporter`, `alex-charter`, `alex-retirement`)
+2. Check the planner logs for tool call attempts
+3. Verify Lambda function names match env vars (`REPORTER_FUNCTION`, `CHARTER_FUNCTION`, `RETIREMENT_FUNCTION`)
+
 ---
 
 ## Technical Architecture Quick Reference
@@ -505,12 +969,50 @@ The most common issues relate to AWS region choices! Check environment variables
 ### Agent Collaboration Pattern
 
 ```
-User Request → SQS Queue → Planner (Orchestrator)
-                            ├─→ Tagger (if needed)
-                            ├─→ Reporter ──┐
-                            ├─→ Charter ───┼─→ Results → Database
-                            └─→ Retirement ┘
+User Request → API → SQS Queue → Planner (Orchestrator Lambda)
+                                    │
+                                    ├─→ Tagger (sync, pre-processing)
+                                    │   └─→ Tags unclassified instruments
+                                    │
+                                    ├─→ Reporter (async tool call)
+                                    │   ├─→ get_market_insights (S3 Vectors)
+                                    │   └─→ Saves report to jobs table
+                                    │
+                                    ├─→ Charter (async tool call)
+                                    │   └─→ Saves chart data to jobs table
+                                    │
+                                    └─→ Retirement (async tool call)
+                                        └─→ Saves projections to jobs table
 ```
+
+### Environment Variables Reference
+
+**All agents** (set via terraform `6_agents/terraform.tfvars`):
+- `BEDROCK_MODEL_ID` - e.g. `us.amazon.nova-pro-v1:0`
+- `BEDROCK_REGION` - e.g. `us-east-1`
+- `AURORA_CLUSTER_ARN` - From Guide 5
+- `AURORA_SECRET_ARN` - From Guide 5
+- `DATABASE_NAME` - e.g. `alex`
+- `DEFAULT_AWS_REGION` - Primary AWS region
+
+**Planner additional**:
+- `TAGGER_FUNCTION` - Lambda name (default: `alex-tagger`)
+- `REPORTER_FUNCTION` - Lambda name (default: `alex-reporter`)
+- `CHARTER_FUNCTION` - Lambda name (default: `alex-charter`)
+- `RETIREMENT_FUNCTION` - Lambda name (default: `alex-retirement`)
+- `POLYGON_API_KEY` - Polygon.io market data
+- `POLYGON_PLAN` - `free` or `paid`
+- `LANGFUSE_SECRET_KEY` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_HOST` - Optional
+- `OPENAI_API_KEY` - Required for agent tracing
+
+**Reporter additional**:
+- `SAGEMAKER_ENDPOINT` - For S3 Vectors search
+- `DEFAULT_AWS_REGION` - SageMaker region
+
+**API backend**:
+- `SQS_QUEUE_URL` - SQS queue for analysis jobs
+- `CLERK_JWKS_URL` - Clerk JWT validation
+- `CORS_ORIGINS` - Comma-separated allowed origins
 
 ### Cost Management
 
@@ -542,7 +1044,7 @@ cd terraform/2_sagemaker && terraform destroy
 - `terraform/*/terraform.tfvars` - Each terraform directory (copy from .example)
 
 ### Code Students May Need to Update
-- `backend/researcher/server.py` - Region and model configuration (Guide 4) - but this should come from variables and shouldn't need code changes
+- `backend/researcher/server.py` - **MUST** update `REGION` and `MODEL` variables (hardcoded, not from env)
 - Agent templates in `backend/*/templates.py` - For customization
 - Frontend pages for UI modifications
 
@@ -592,4 +1094,4 @@ When helping students:
 
 ---
 
-*This guide was created to help AI assistants (like Claude Code) effectively support students through the Alex project. Last updated: October 2025*
+*This guide was created to help AI assistants (like Claude Code) effectively support students through the Alex project. Last updated: March 2026*
