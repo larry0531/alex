@@ -10,8 +10,11 @@ from dataclasses import dataclass
 
 from agents import function_tool, RunContextWrapper
 from agents.extensions.models.litellm_model import LitellmModel
+from circuit_breaker import CircuitBreaker, CircuitOpenError
 
 logger = logging.getLogger()
+
+_sagemaker_circuit = CircuitBreaker(name="sagemaker", failure_threshold=3, recovery_timeout=60)
 
 
 @dataclass
@@ -125,6 +128,10 @@ async def get_market_insights(
     Returns:
         Relevant market context and insights
     """
+    if not _sagemaker_circuit.allow_request():
+        logger.warning("SageMaker circuit is OPEN, skipping embedding/vector search")
+        return "Market insights unavailable (service temporarily disabled) - proceeding with standard analysis."
+
     try:
         import boto3
 
@@ -162,6 +169,8 @@ async def get_market_insights(
             returnMetadata=True,
         )
 
+        _sagemaker_circuit.record_success()
+
         # Format insights
         insights = []
         for vector in response.get("vectors", []):
@@ -178,7 +187,8 @@ async def get_market_insights(
             return "Market insights unavailable - proceeding with standard analysis."
 
     except Exception as e:
-        logger.warning(f"Reporter: Could not retrieve market insights: {e}")
+        _sagemaker_circuit.record_failure()
+        logger.warning(f"Reporter: Could not retrieve market insights: {e} (circuit state: {_sagemaker_circuit.state.value})")
         return "Market insights unavailable - proceeding with standard analysis."
 
 

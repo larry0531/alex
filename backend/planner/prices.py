@@ -1,17 +1,25 @@
 from polygon import RESTClient
 from dotenv import load_dotenv
 import os
+import logging
 from datetime import datetime
 import random
 from functools import lru_cache
 from datetime import timezone
+from circuit_breaker import CircuitBreaker, CircuitOpenError
 
 load_dotenv(override=True)
+
+logger = logging.getLogger()
 
 polygon_api_key = os.getenv("POLYGON_API_KEY")
 polygon_plan = os.getenv("POLYGON_PLAN")
 
 is_paid_polygon = polygon_plan == "paid"
+
+# Circuit breaker for Polygon.io API:
+# Opens after 3 consecutive failures, retries after 60 seconds
+_polygon_circuit = CircuitBreaker(name="polygon", failure_threshold=3, recovery_timeout=60)
 
 
 def is_market_open() -> bool:
@@ -58,8 +66,14 @@ def get_share_price_polygon(symbol) -> float:
 
 def get_share_price(symbol) -> float:
     if polygon_api_key:
+        if not _polygon_circuit.allow_request():
+            logger.warning(f"Polygon circuit is OPEN, skipping API call for {symbol}")
+            return float(random.randint(1, 100))
         try:
-            return get_share_price_polygon(symbol)
+            price = get_share_price_polygon(symbol)
+            _polygon_circuit.record_success()
+            return price
         except Exception as e:
-            print(f"Was not able to use the polygon API due to {e}; using a random number")
+            _polygon_circuit.record_failure()
+            logger.warning(f"Polygon API failed for {symbol}: {e}")
     return float(random.randint(1, 100))
