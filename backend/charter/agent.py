@@ -7,6 +7,7 @@ import logging
 from typing import Dict, Any
 
 from agents.extensions.models.litellm_model import LitellmModel
+from shared.portfolio import calculate_portfolio_value, aggregate_allocations, _safe_float
 
 from templates import CHARTER_INSTRUCTIONS, create_charter_task
 
@@ -19,38 +20,29 @@ def analyze_portfolio(portfolio_data: Dict[str, Any]) -> str:
     Returns detailed breakdown of positions, accounts, and calculated allocations.
     """
     result = []
-    total_value = 0.0
+    total_value = calculate_portfolio_value(portfolio_data)
     position_values = {}
     account_totals = {}
 
-    # Calculate position values and totals
+    # Calculate position values and totals per account
     for account in portfolio_data.get("accounts", []):
         account_name = account.get("name", "Unknown")
         account_type = account.get("type", "unknown")
-        # Handle None or missing cash_balance
-        cash_balance = account.get("cash_balance")
-        if cash_balance is None or cash_balance == "":
-            cash = 0.0
-        else:
-            cash = float(cash_balance)
+        cash = _safe_float(account.get("cash_balance"))
 
         if account_name not in account_totals:
             account_totals[account_name] = {"value": 0, "type": account_type, "positions": []}
 
         account_totals[account_name]["value"] += cash
-        total_value += cash
 
         for position in account.get("positions", []):
             symbol = position.get("symbol")
-            quantity = float(position.get("quantity", 0))
+            quantity = _safe_float(position.get("quantity"))
             instrument = position.get("instrument", {})
-            # Handle None or missing current_price
-            current_price = instrument.get("current_price")
-            if current_price is None or current_price == "":
-                price = 1.0  # Default price if not available
-                logger.warning(f"Charter: No price for {symbol}, using default of 1.0")
-            else:
-                price = float(current_price)
+            price = _safe_float(instrument.get("current_price"))
+            if price == 0.0:
+                logger.warning(f"Charter: No price for {symbol}, skipping value")
+                continue
             value = quantity * price
 
             position_values[symbol] = position_values.get(symbol, 0) + value
@@ -58,7 +50,6 @@ def analyze_portfolio(portfolio_data: Dict[str, Any]) -> str:
             account_totals[account_name]["positions"].append(
                 {"symbol": symbol, "value": value, "instrument": instrument}
             )
-            total_value += value
 
     # Build analysis summary
     result.append("Portfolio Analysis:")
@@ -77,59 +68,22 @@ def analyze_portfolio(portfolio_data: Dict[str, Any]) -> str:
         pct = (value / total_value * 100) if total_value > 0 else 0
         result.append(f"  {symbol}: ${value:,.2f} ({pct:.1f}%)")
 
-    # Calculate aggregated allocations for the agent
+    # Use shared allocation aggregation
+    allocations = aggregate_allocations(portfolio_data)
+    asset_classes = allocations["asset_classes"]
+    regions = allocations["regions"]
+    sectors = allocations["sectors"]
+
     result.append("\nCalculated Allocations:")
-    
-    # Asset class aggregation
-    asset_classes = {}
-    regions = {}
-    sectors = {}
-    
-    for account in portfolio_data.get("accounts", []):
-        for position in account.get("positions", []):
-            symbol = position.get("symbol")
-            quantity = float(position.get("quantity", 0))
-            instrument = position.get("instrument", {})
-            # Handle None or missing current_price
-            current_price = instrument.get("current_price")
-            if current_price is None or current_price == "":
-                price = 1.0  # Default price if not available
-                logger.warning(f"Charter: No price for {symbol}, using default of 1.0")
-            else:
-                price = float(current_price)
-            value = quantity * price
-            
-            # Aggregate asset classes
-            for asset_class, pct in instrument.get("allocation_asset_class", {}).items():
-                asset_value = value * (pct / 100)
-                asset_classes[asset_class] = asset_classes.get(asset_class, 0) + asset_value
-            
-            # Aggregate regions
-            for region, pct in instrument.get("allocation_regions", {}).items():
-                region_value = value * (pct / 100)
-                regions[region] = regions.get(region, 0) + region_value
-            
-            # Aggregate sectors
-            for sector, pct in instrument.get("allocation_sectors", {}).items():
-                sector_value = value * (pct / 100)
-                sectors[sector] = sectors.get(sector, 0) + sector_value
-    
-    # Add cash to asset classes
-    total_cash = sum(
-        float(acc.get("cash_balance")) if acc.get("cash_balance") is not None else 0
-        for acc in portfolio_data.get("accounts", [])
-    )
-    if total_cash > 0:
-        asset_classes["cash"] = asset_classes.get("cash", 0) + total_cash
-    
+
     result.append("\nAsset Classes:")
     for asset_class, value in sorted(asset_classes.items(), key=lambda x: x[1], reverse=True):
         result.append(f"  {asset_class}: ${value:,.2f}")
-    
+
     result.append("\nGeographic Regions:")
     for region, value in sorted(regions.items(), key=lambda x: x[1], reverse=True):
         result.append(f"  {region}: ${value:,.2f}")
-    
+
     result.append("\nSectors:")
     for sector, value in sorted(sectors.items(), key=lambda x: x[1], reverse=True)[:10]:
         result.append(f"  {sector}: ${value:,.2f}")
