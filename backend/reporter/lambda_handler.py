@@ -131,7 +131,7 @@ def lambda_handler(event, context):
 
             portfolio_data = event.get("portfolio_data")
             if not portfolio_data:
-                # Try to load from database
+                # Load from database using batch query
                 try:
                     job = db.jobs.find_by_id(job_id)
                     if job:
@@ -141,33 +141,7 @@ def lambda_handler(event, context):
                             observability.create_event(
                                 name="Reporter Started!", status_message="OK"
                             )
-                        user = db.users.find_by_clerk_id(user_id)
-                        accounts = db.accounts.find_by_user(user_id)
-
-                        portfolio_data = {"user_id": user_id, "job_id": job_id, "accounts": []}
-
-                        for account in accounts:
-                            positions = db.positions.find_by_account(account["id"])
-                            account_data = {
-                                "id": account["id"],
-                                "name": account["account_name"],
-                                "type": account.get("account_type", "investment"),
-                                "cash_balance": float(account.get("cash_balance", 0)),
-                                "positions": [],
-                            }
-
-                            for position in positions:
-                                instrument = db.instruments.find_by_symbol(position["symbol"])
-                                if instrument:
-                                    account_data["positions"].append(
-                                        {
-                                            "symbol": position["symbol"],
-                                            "quantity": float(position["quantity"]),
-                                            "instrument": instrument,
-                                        }
-                                    )
-
-                            portfolio_data["accounts"].append(account_data)
+                        portfolio_data = db.load_user_portfolio(user_id, job_id)
                     else:
                         return {
                             "statusCode": 404,

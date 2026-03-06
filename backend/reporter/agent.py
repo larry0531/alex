@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from agents import function_tool, RunContextWrapper
 from agents.extensions.models.litellm_model import LitellmModel
+from shared.portfolio import calculate_portfolio_value
 
 logger = logging.getLogger()
 
@@ -26,34 +27,26 @@ class ReporterContext:
 
 def calculate_portfolio_metrics(portfolio_data: Dict[str, Any]) -> Dict[str, Any]:
     """Calculate basic portfolio metrics."""
-    metrics = {
-        "total_value": 0,
-        "cash_balance": 0,
-        "num_accounts": len(portfolio_data.get("accounts", [])),
-        "num_positions": 0,
-        "unique_symbols": set(),
-    }
+    unique_symbols = set()
+    num_positions = 0
+    cash_balance = 0.0
 
     for account in portfolio_data.get("accounts", []):
-        metrics["cash_balance"] += float(account.get("cash_balance", 0))
+        cash_balance += float(account.get("cash_balance", 0))
         positions = account.get("positions", [])
-        metrics["num_positions"] += len(positions)
-
+        num_positions += len(positions)
         for position in positions:
             symbol = position.get("symbol")
             if symbol:
-                metrics["unique_symbols"].add(symbol)
+                unique_symbols.add(symbol)
 
-            # Calculate value if we have price
-            instrument = position.get("instrument", {})
-            if instrument.get("current_price"):
-                value = float(position.get("quantity", 0)) * float(instrument["current_price"])
-                metrics["total_value"] += value
-
-    metrics["total_value"] += metrics["cash_balance"]
-    metrics["unique_symbols"] = len(metrics["unique_symbols"])
-
-    return metrics
+    return {
+        "total_value": calculate_portfolio_value(portfolio_data),
+        "cash_balance": cash_balance,
+        "num_accounts": len(portfolio_data.get("accounts", [])),
+        "num_positions": num_positions,
+        "unique_symbols": len(unique_symbols),
+    }
 
 
 def format_portfolio_for_analysis(portfolio_data: Dict[str, Any], user_data: Dict[str, Any]) -> str:

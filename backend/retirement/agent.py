@@ -11,67 +11,26 @@ from datetime import datetime
 
 # No tools needed - simplified agent
 from agents.extensions.models.litellm_model import LitellmModel
+from shared.portfolio import calculate_portfolio_value, aggregate_allocations
 
 logger = logging.getLogger()
 
-# Context removed - no longer needed without tools
-
-
-def calculate_portfolio_value(portfolio_data: Dict[str, Any]) -> float:
-    """Calculate current portfolio value."""
-    total_value = 0.0
-
-    for account in portfolio_data.get("accounts", []):
-        cash = float(account.get("cash_balance", 0))
-        total_value += cash
-
-        for position in account.get("positions", []):
-            quantity = float(position.get("quantity", 0))
-            instrument = position.get("instrument", {})
-            price = float(instrument.get("current_price", 100))
-            total_value += quantity * price
-
-    return total_value
-
 
 def calculate_asset_allocation(portfolio_data: Dict[str, Any]) -> Dict[str, float]:
-    """Calculate asset allocation percentages."""
-    total_equity = 0.0
-    total_bonds = 0.0
-    total_real_estate = 0.0
-    total_commodities = 0.0
-    total_cash = 0.0
-    total_value = 0.0
-
-    for account in portfolio_data.get("accounts", []):
-        cash = float(account.get("cash_balance", 0))
-        total_cash += cash
-        total_value += cash
-
-        for position in account.get("positions", []):
-            quantity = float(position.get("quantity", 0))
-            instrument = position.get("instrument", {})
-            price = float(instrument.get("current_price", 100))
-            value = quantity * price
-            total_value += value
-
-            # Get asset class allocation
-            asset_allocation = instrument.get("allocation_asset_class", {})
-            if asset_allocation:
-                total_equity += value * asset_allocation.get("equity", 0) / 100
-                total_bonds += value * asset_allocation.get("fixed_income", 0) / 100
-                total_real_estate += value * asset_allocation.get("real_estate", 0) / 100
-                total_commodities += value * asset_allocation.get("commodities", 0) / 100
-
+    """Calculate asset allocation as percentages using shared aggregation."""
+    total_value = calculate_portfolio_value(portfolio_data)
     if total_value == 0:
         return {"equity": 0, "bonds": 0, "real_estate": 0, "commodities": 0, "cash": 0}
 
+    allocations = aggregate_allocations(portfolio_data)
+    asset_classes = allocations["asset_classes"]
+
     return {
-        "equity": total_equity / total_value,
-        "bonds": total_bonds / total_value,
-        "real_estate": total_real_estate / total_value,
-        "commodities": total_commodities / total_value,
-        "cash": total_cash / total_value,
+        "equity": asset_classes.get("equity", 0) / total_value,
+        "bonds": asset_classes.get("fixed_income", 0) / total_value,
+        "real_estate": asset_classes.get("real_estate", 0) / total_value,
+        "commodities": asset_classes.get("commodities", 0) / total_value,
+        "cash": asset_classes.get("cash", 0) / total_value,
     }
 
 

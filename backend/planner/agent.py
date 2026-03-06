@@ -85,25 +85,27 @@ def handle_missing_instruments(job_id: str, db) -> None:
         return
 
     user_id = job["clerk_user_id"]
-    accounts = db.accounts.find_by_user(user_id)
 
+    # Load all positions with instrument data in a single query
+    rows = db.positions.find_by_user_with_instruments(user_id)
+
+    seen_symbols = set()
     missing = []
-    for account in accounts:
-        positions = db.positions.find_by_account(account["id"])
-        for position in positions:
-            instrument = db.instruments.find_by_symbol(position["symbol"])
-            if instrument:
-                has_allocations = bool(
-                    instrument.get("allocation_regions")
-                    and instrument.get("allocation_sectors")
-                    and instrument.get("allocation_asset_class")
-                )
-                if not has_allocations:
-                    missing.append(
-                        {"symbol": position["symbol"], "name": instrument.get("name", "")}
-                    )
-            else:
-                missing.append({"symbol": position["symbol"], "name": ""})
+    for row in rows:
+        symbol = row["symbol"]
+        if symbol in seen_symbols:
+            continue
+        seen_symbols.add(symbol)
+
+        has_allocations = bool(
+            row.get("allocation_regions")
+            and row.get("allocation_sectors")
+            and row.get("allocation_asset_class")
+        )
+        if not has_allocations:
+            missing.append(
+                {"symbol": symbol, "name": row.get("instrument_name", "")}
+            )
 
     if missing:
         logger.info(
@@ -147,32 +149,32 @@ def load_portfolio_summary(job_id: str, db) -> Dict[str, Any]:
         if not user:
             raise ValueError(f"User {user_id} not found")
 
-        accounts = db.accounts.find_by_user(user_id)
-        
-        # Calculate simple summary statistics
+        # Load all positions with instrument data in a single query
+        rows = db.positions.find_by_user_with_instruments(user_id)
+
+        # Calculate summary from the flat result set
         total_value = 0.0
-        total_positions = 0
-        total_cash = 0.0
-        
-        for account in accounts:
-            total_cash += float(account.get("cash_balance", 0))
-            positions = db.positions.find_by_account(account["id"])
-            total_positions += len(positions)
-            
-            # Add position values
-            for position in positions:
-                instrument = db.instruments.find_by_symbol(position["symbol"])
-                if instrument and instrument.get("current_price"):
-                    price = float(instrument["current_price"])
-                    quantity = float(position["quantity"])
-                    total_value += price * quantity
-        
+        total_positions = len(rows)
+        account_ids = set()
+
+        for row in rows:
+            account_ids.add(row["account_id"])
+            price = row.get("current_price")
+            if price:
+                total_value += float(price) * float(row["quantity"])
+
+        # Add cash balances from accounts (single query)
+        accounts = db.accounts.find_by_user(user_id)
+        total_cash = sum(float(a.get("cash_balance", 0)) for a in accounts)
         total_value += total_cash
-        
-        # Return only summary statistics
+
+        # Include cash-only accounts in the count
+        for a in accounts:
+            account_ids.add(a["id"])
+
         return {
             "total_value": total_value,
-            "num_accounts": len(accounts),
+            "num_accounts": len(account_ids),
             "num_positions": total_positions,
             "years_until_retirement": user.get("years_until_retirement", 30),
             "target_retirement_income": float(user.get("target_retirement_income", 80000))
