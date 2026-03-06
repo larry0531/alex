@@ -301,9 +301,7 @@ async def delete_account(account_id: str, clerk_user_id: str = Depends(get_curre
             raise HTTPException(status_code=403, detail="Not authorized")
 
         # Delete all positions first (due to foreign key constraint)
-        positions = db.positions.find_by_account(account_id)
-        for position in positions:
-            db.positions.delete(position['id'])
+        db.positions.delete_by_account(account_id)
 
         # Delete the account
         db.accounts.delete(account_id)
@@ -330,13 +328,20 @@ async def list_positions(account_id: str, clerk_user_id: str = Depends(get_curre
         if account.get('clerk_user_id') != clerk_user_id:
             raise HTTPException(status_code=403, detail="Not authorized")
 
-        positions = db.positions.find_by_account(account_id)
+        positions = db.positions.find_by_account_with_instruments(account_id)
 
         # Format positions with instrument data for frontend
         formatted_positions = []
         for pos in positions:
-            # Get full instrument data
-            instrument = db.instruments.find_by_symbol(pos['symbol'])
+            instrument = {
+                'symbol': pos['symbol'],
+                'name': pos.get('instrument_name', ''),
+                'instrument_type': pos.get('instrument_type', ''),
+                'current_price': pos.get('current_price'),
+                'allocation_regions': pos.get('allocation_regions'),
+                'allocation_sectors': pos.get('allocation_sectors'),
+                'allocation_asset_class': pos.get('allocation_asset_class'),
+            }
             formatted_positions.append({
                 **pos,
                 'instrument': instrument

@@ -148,11 +148,9 @@ def lambda_handler(event, context):
 
             portfolio_data = event.get('portfolio_data')
             if not portfolio_data:
-                # Try to load from database
+                # Load from database using batch query
                 logger.info(f"Retirement Loading portfolio data for job {job_id}")
                 try:
-                    import sys
-                    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
                     from src import Database
 
                     db = Database()
@@ -162,39 +160,11 @@ def lambda_handler(event, context):
                             observability.create_event(
                                 name="Retirement Started!", status_message="OK"
                             )
-                        
-                        # portfolio_data = job.get('request_payload', {}).get('portfolio_data', {})
+
                         user_id = job['clerk_user_id']
                         user = db.users.find_by_clerk_id(user_id)
-                        accounts = db.accounts.find_by_user(user_id)
-
-                        portfolio_data = {
-                            'user_id': user_id,
-                            'job_id': job_id,
-                            'years_until_retirement': user.get('years_until_retirement', 30) if user else 30,
-                            'accounts': []
-                        }
-
-                        for account in accounts:
-                            account_data = {
-                                'id': account['id'],
-                                'name': account['account_name'],
-                                'type': account.get('account_type', 'investment'),
-                                'cash_balance': float(account.get('cash_balance', 0)),
-                                'positions': []
-                            }
-
-                            positions = db.positions.find_by_account(account['id'])
-                            for position in positions:
-                                instrument = db.instruments.find_by_symbol(position['symbol'])
-                                if instrument:
-                                    account_data['positions'].append({
-                                        'symbol': position['symbol'],
-                                        'quantity': float(position['quantity']),
-                                        'instrument': instrument
-                                    })
-
-                            portfolio_data['accounts'].append(account_data)
+                        portfolio_data = db.load_user_portfolio(user_id, job_id)
+                        portfolio_data['years_until_retirement'] = user.get('years_until_retirement', 30) if user else 30
 
                         logger.info(f"Retirement: Loaded {len(portfolio_data['accounts'])} accounts with positions")
                     else:

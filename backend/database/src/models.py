@@ -192,6 +192,45 @@ class Positions(BaseModel):
             }
         return {'num_positions': 0, 'total_value': 0, 'total_shares': 0}
     
+    def find_by_account_with_instruments(self, account_id: str) -> List[Dict]:
+        """Find all positions in an account with full instrument data in a single query."""
+        sql = """
+            SELECT p.*,
+                   i.name as instrument_name, i.instrument_type, i.current_price,
+                   i.allocation_regions, i.allocation_sectors, i.allocation_asset_class
+            FROM positions p
+            JOIN instruments i ON p.symbol = i.symbol
+            WHERE p.account_id = :account_id::uuid
+            ORDER BY p.symbol
+        """
+        params = [{'name': 'account_id', 'value': {'stringValue': account_id}}]
+        return self.db.query(sql, params)
+
+    def find_by_user_with_instruments(self, clerk_user_id: str) -> List[Dict]:
+        """Find all positions for a user across all accounts with full instrument data.
+
+        Returns positions with account and instrument info in a single query,
+        avoiding N+1 queries when loading portfolio data.
+        """
+        sql = """
+            SELECT p.id, p.account_id, p.symbol, p.quantity, p.as_of_date,
+                   a.account_name, a.account_purpose, a.cash_balance,
+                   a.account_type,
+                   i.name as instrument_name, i.instrument_type, i.current_price,
+                   i.allocation_regions, i.allocation_sectors, i.allocation_asset_class
+            FROM positions p
+            JOIN accounts a ON p.account_id = a.id
+            JOIN instruments i ON p.symbol = i.symbol
+            WHERE a.clerk_user_id = :user_id
+            ORDER BY a.account_name, p.symbol
+        """
+        params = [{'name': 'user_id', 'value': {'stringValue': clerk_user_id}}]
+        return self.db.query(sql, params)
+
+    def delete_by_account(self, account_id: str) -> int:
+        """Delete all positions for an account in a single query."""
+        return self.db.delete(self.table_name, "account_id = :account_id::uuid", {'account_id': account_id})
+
     def add_position(self, account_id: str, symbol: str, quantity: Decimal) -> str:
         """Add or update a position"""
         # Use UPSERT to handle existing positions
@@ -311,10 +350,73 @@ class Database:
         self.positions = Positions(self.client)
         self.jobs = Jobs(self.client)
     
+    def load_user_portfolio(self, clerk_user_id: str, job_id: str = None) -> Dict:
+        """Load full portfolio data for a user in a single query.
+
+        Returns a dict matching the portfolio_data format expected by agents:
+        {
+            "user_id": str,
+            "job_id": str | None,
+            "accounts": [
+                {
+                    "id": str, "name": str, "type": str, "cash_balance": float,
+                    "positions": [
+                        {"symbol": str, "quantity": float, "instrument": {...}}
+                    ]
+                }
+            ]
+        }
+        """
+        rows = self.positions.find_by_user_with_instruments(clerk_user_id)
+
+        # Group rows by account
+        accounts_map: Dict[str, Dict] = {}
+        for row in rows:
+            aid = row["account_id"]
+            if aid not in accounts_map:
+                accounts_map[aid] = {
+                    "id": aid,
+                    "name": row.get("account_name", ""),
+                    "type": row.get("account_type", "investment"),
+                    "cash_balance": float(row.get("cash_balance", 0)),
+                    "positions": [],
+                }
+            accounts_map[aid]["positions"].append({
+                "symbol": row["symbol"],
+                "quantity": float(row["quantity"]),
+                "instrument": {
+                    "symbol": row["symbol"],
+                    "name": row.get("instrument_name", ""),
+                    "instrument_type": row.get("instrument_type", ""),
+                    "current_price": row.get("current_price"),
+                    "allocation_regions": row.get("allocation_regions"),
+                    "allocation_sectors": row.get("allocation_sectors"),
+                    "allocation_asset_class": row.get("allocation_asset_class"),
+                },
+            })
+
+        # Include accounts with no positions (cash-only)
+        all_accounts = self.accounts.find_by_user(clerk_user_id)
+        for acct in all_accounts:
+            if acct["id"] not in accounts_map:
+                accounts_map[acct["id"]] = {
+                    "id": acct["id"],
+                    "name": acct.get("account_name", ""),
+                    "type": acct.get("account_type", "investment"),
+                    "cash_balance": float(acct.get("cash_balance", 0)),
+                    "positions": [],
+                }
+
+        return {
+            "user_id": clerk_user_id,
+            "job_id": job_id,
+            "accounts": list(accounts_map.values()),
+        }
+
     def execute_raw(self, sql: str, parameters: List[Dict] = None) -> Dict:
         """Execute raw SQL for complex queries"""
         return self.client.execute(sql, parameters)
-    
+
     def query_raw(self, sql: str, parameters: List[Dict] = None) -> List[Dict]:
         """Execute raw SELECT query"""
         return self.client.query(sql, parameters)
