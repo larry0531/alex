@@ -6,6 +6,9 @@ import { showToast } from '../components/Toast';
 // API base URL - in production this will be the API Gateway URL
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+// API version prefix - all endpoints use versioned paths
+const API_PREFIX = '/api/v1';
+
 // Type definitions
 export interface User {
   clerk_user_id: string;
@@ -95,8 +98,8 @@ export function createApiClient(token: string) {
   return {
     // User endpoints
     user: {
-      get: () => apiRequest<User>('/api/user', token),
-      update: (data: Partial<User>) => apiRequest<User>('/api/user', token, {
+      get: () => apiRequest<User>(`${API_PREFIX}/user`, token),
+      update: (data: Partial<User>) => apiRequest<User>(`${API_PREFIX}/user`, token, {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
@@ -104,36 +107,36 @@ export function createApiClient(token: string) {
 
     // Account endpoints
     accounts: {
-      list: () => apiRequest<Account[]>('/api/accounts', token),
-      create: (data: Partial<Account>) => apiRequest<Account>('/api/accounts', token, {
+      list: () => apiRequest<Account[]>(`${API_PREFIX}/accounts`, token),
+      create: (data: Partial<Account>) => apiRequest<Account>(`${API_PREFIX}/accounts`, token, {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-      update: (id: string, data: Partial<Account>) => apiRequest<Account>(`/api/accounts/${id}`, token, {
+      update: (id: string, data: Partial<Account>) => apiRequest<Account>(`${API_PREFIX}/accounts/${id}`, token, {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
-      positions: (id: string) => apiRequest<Position[]>(`/api/accounts/${id}/positions`, token),
+      positions: (id: string) => apiRequest<Position[]>(`${API_PREFIX}/accounts/${id}/positions`, token),
     },
 
     // Position endpoints
     positions: {
-      create: (data: Partial<Position>) => apiRequest<Position>('/api/positions', token, {
+      create: (data: Partial<Position>) => apiRequest<Position>(`${API_PREFIX}/positions`, token, {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-      update: (id: string, data: Partial<Position>) => apiRequest<Position>(`/api/positions/${id}`, token, {
+      update: (id: string, data: Partial<Position>) => apiRequest<Position>(`${API_PREFIX}/positions/${id}`, token, {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
-      delete: (id: string) => apiRequest<void>(`/api/positions/${id}`, token, {
+      delete: (id: string) => apiRequest<void>(`${API_PREFIX}/positions/${id}`, token, {
         method: 'DELETE',
       }),
     },
 
     // Analysis endpoints
     analysis: {
-      trigger: (data: Record<string, unknown> = {}) => apiRequest<Job>('/api/analyze', token, {
+      trigger: (data: Record<string, unknown> = {}) => apiRequest<Job>(`${API_PREFIX}/analyze`, token, {
         method: 'POST',
         body: JSON.stringify(data),
       }),
@@ -141,8 +144,8 @@ export function createApiClient(token: string) {
 
     // Job endpoints
     jobs: {
-      get: (id: string) => apiRequest<Job>(`/api/jobs/${id}`, token),
-      list: () => apiRequest<Job[]>('/api/jobs', token),
+      get: (id: string) => apiRequest<Job>(`${API_PREFIX}/jobs/${id}`, token),
+      list: () => apiRequest<Job[]>(`${API_PREFIX}/jobs`, token),
     },
   };
 }
