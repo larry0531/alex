@@ -7,6 +7,8 @@ import json
 import asyncio
 import logging
 from typing import Dict, Any
+from urllib.request import Request as UrlRequest, urlopen
+from urllib.error import URLError
 
 from agents import Agent, Runner, trace
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -32,6 +34,21 @@ logger.setLevel(logging.INFO)
 # Initialize database
 db = Database()
 
+# API base URL for WebSocket notification (local dev or production)
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+
+
+def notify_job_status(job_id: str) -> None:
+    """Notify the API server of a job status change so it can push to WebSocket clients."""
+    try:
+        url = f"{API_BASE_URL}/api/jobs/{job_id}/notify"
+        req = UrlRequest(url, method="POST", data=b"", headers={"Content-Type": "application/json"})
+        with urlopen(req, timeout=5) as resp:
+            logger.info(f"Planner: Notified API of status change for job {job_id}, response: {resp.status}")
+    except (URLError, OSError) as e:
+        # Non-fatal: WebSocket notification is best-effort
+        logger.warning(f"Planner: Could not notify API for job {job_id}: {e}")
+
 @retry(
     retry=retry_if_exception_type(RateLimitError),
     stop=stop_after_attempt(5),
@@ -43,7 +60,8 @@ async def run_orchestrator(job_id: str) -> None:
     try:
         # Update job status to running
         db.jobs.update_status(job_id, 'running')
-        
+        notify_job_status(job_id)
+
         # Handle missing instruments first (non-agent pre-processing)
         await asyncio.to_thread(handle_missing_instruments, job_id, db)
 
@@ -76,11 +94,13 @@ async def run_orchestrator(job_id: str) -> None:
             
             # Mark job as completed after all agents finish
             db.jobs.update_status(job_id, "completed")
+            notify_job_status(job_id)
             logger.info(f"Planner: Job {job_id} completed successfully")
-            
+
     except Exception as e:
         logger.error(f"Planner: Error in orchestration: {e}", exc_info=True)
         db.jobs.update_status(job_id, 'failed', error_message=str(e))
+        notify_job_status(job_id)
         raise
 
 def lambda_handler(event, context):

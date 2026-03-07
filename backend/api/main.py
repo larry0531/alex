@@ -6,12 +6,13 @@ Handles all API routes with Clerk JWT authentication
 import os
 import json
 import logging
+import asyncio
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from decimal import Decimal
 import uuid
 
-from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
@@ -90,6 +91,43 @@ async def general_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "An unexpected error occurred. Our team has been notified."}
     )
+
+# WebSocket connection manager for real-time job status updates
+class JobConnectionManager:
+    """Manages WebSocket connections for job status streaming."""
+
+    def __init__(self):
+        # Map job_id -> list of connected WebSockets
+        self.connections: Dict[str, List[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, job_id: str):
+        await websocket.accept()
+        if job_id not in self.connections:
+            self.connections[job_id] = []
+        self.connections[job_id].append(websocket)
+        logger.info(f"WebSocket connected for job {job_id}, total connections: {len(self.connections[job_id])}")
+
+    def disconnect(self, websocket: WebSocket, job_id: str):
+        if job_id in self.connections:
+            self.connections[job_id] = [ws for ws in self.connections[job_id] if ws != websocket]
+            if not self.connections[job_id]:
+                del self.connections[job_id]
+        logger.info(f"WebSocket disconnected for job {job_id}")
+
+    async def broadcast_job_status(self, job_id: str, data: dict):
+        """Send job status update to all connected clients for a job."""
+        if job_id not in self.connections:
+            return
+        disconnected = []
+        for ws in self.connections[job_id]:
+            try:
+                await ws.send_json(data)
+            except Exception:
+                disconnected.append(ws)
+        for ws in disconnected:
+            self.disconnect(ws, job_id)
+
+ws_manager = JobConnectionManager()
 
 # Initialize services
 db = Database()
@@ -762,6 +800,84 @@ async def populate_test_data(clerk_user_id: str = Depends(get_current_user_id)):
     except Exception as e:
         logger.error(f"Error populating test data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# WebSocket endpoint for real-time job status updates
+@app.websocket("/ws/jobs/{job_id}")
+async def websocket_job_status(websocket: WebSocket, job_id: str):
+    """
+    WebSocket endpoint for real-time job status updates.
+    Client connects and receives status updates until job completes or fails.
+    """
+    await ws_manager.connect(websocket, job_id)
+    last_status = None
+    try:
+        while True:
+            # Check job status from DB
+            job = db.jobs.find_by_id(job_id)
+            if not job:
+                await websocket.send_json({"type": "error", "message": "Job not found"})
+                break
+
+            current_status = job.get("status")
+            # Only send update when status changes
+            if current_status != last_status:
+                last_status = current_status
+                payload = {
+                    "type": "status_update",
+                    "job_id": job_id,
+                    "status": current_status,
+                    "report_payload": job.get("report_payload"),
+                    "charts_payload": job.get("charts_payload"),
+                    "retirement_payload": job.get("retirement_payload"),
+                    "error_message": job.get("error_message"),
+                }
+                await websocket.send_json(payload)
+
+                if current_status in ("completed", "failed"):
+                    break
+
+            # Wait before next check, but also listen for client messages
+            try:
+                # Use asyncio.wait_for to allow receiving client pings/messages
+                msg = await asyncio.wait_for(websocket.receive_text(), timeout=2.0)
+                # Client can send "ping" to keep alive
+                if msg == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except asyncio.TimeoutError:
+                # No message from client, continue polling DB
+                pass
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket client disconnected for job {job_id}")
+    except Exception as e:
+        logger.error(f"WebSocket error for job {job_id}: {e}")
+    finally:
+        ws_manager.disconnect(websocket, job_id)
+
+
+@app.post("/api/jobs/{job_id}/notify")
+async def notify_job_status(job_id: str):
+    """
+    Notification endpoint called by Planner Lambda when job status changes.
+    Broadcasts the update to all connected WebSocket clients for this job.
+    No auth required as this is internal service-to-service communication.
+    """
+    job = db.jobs.find_by_id(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    payload = {
+        "type": "status_update",
+        "job_id": job_id,
+        "status": job.get("status"),
+        "report_payload": job.get("report_payload"),
+        "charts_payload": job.get("charts_payload"),
+        "retirement_payload": job.get("retirement_payload"),
+        "error_message": job.get("error_message"),
+    }
+    await ws_manager.broadcast_job_status(job_id, payload)
+    return {"message": "Notification sent", "connections": len(ws_manager.connections.get(job_id, []))}
+
 
 # Lambda handler
 handler = Mangum(app)
