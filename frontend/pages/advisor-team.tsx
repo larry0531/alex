@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@clerk/nextjs';
 import Layout from '../components/Layout';
 import { API_URL } from '../lib/config';
 import { emitAnalysisCompleted, emitAnalysisFailed, emitAnalysisStarted } from '../lib/events';
+import { useJobWebSocket, JobStatusUpdate } from '../lib/useJobWebSocket';
 import Head from 'next/head';
 
 interface Agent {
@@ -75,87 +76,63 @@ export default function AdvisorTeam() {
     message: '',
     activeAgents: []
   });
-  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+  // WebSocket callbacks for real-time job status
+  const handleStatusChange = useCallback((update: JobStatusUpdate) => {
+    if (update.status === 'running') {
+      setProgress({
+        stage: 'parallel',
+        message: 'Agents working in parallel...',
+        activeAgents: ['Portfolio Analyst', 'Chart Specialist', 'Retirement Planner']
+      });
+    }
+  }, []);
+
+  const handleCompleted = useCallback((update: JobStatusUpdate) => {
+    const jobId = update.job_id || currentJobId;
+    setProgress({
+      stage: 'complete',
+      message: 'Analysis complete!',
+      activeAgents: []
+    });
+    if (jobId) {
+      emitAnalysisCompleted(jobId);
+    }
+    fetchJobs();
+    setTimeout(() => {
+      if (jobId) {
+        router.push(`/analysis?job_id=${jobId}`);
+      }
+    }, 1500);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentJobId, router]);
+
+  const handleFailed = useCallback((update: JobStatusUpdate) => {
+    const jobId = update.job_id || currentJobId;
+    setProgress({
+      stage: 'error',
+      message: 'Analysis failed',
+      activeAgents: [],
+      error: update.error_message || 'Analysis encountered an error'
+    });
+    if (jobId) {
+      emitAnalysisFailed(jobId, update.error_message);
+    }
+    setIsAnalyzing(false);
+    setCurrentJobId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentJobId]);
+
+  // Connect WebSocket when currentJobId is set
+  useJobWebSocket(currentJobId, {
+    onStatusChange: handleStatusChange,
+    onCompleted: handleCompleted,
+    onFailed: handleFailed,
+  });
 
   useEffect(() => {
     fetchJobs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    const checkJobStatusLocal = async (jobId: string) => {
-      try {
-        const token = await getToken();
-        const response = await fetch(`${API_URL}/api/jobs/${jobId}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-
-        if (response.ok) {
-          const job = await response.json();
-
-          if (job.status === 'completed') {
-            setProgress({
-              stage: 'complete',
-              message: 'Analysis complete!',
-              activeAgents: []
-            });
-
-            if (pollInterval) {
-              clearInterval(pollInterval);
-              setPollInterval(null);
-            }
-
-            // Emit completion event so other components can refresh
-            emitAnalysisCompleted(jobId);
-
-            // Also refresh our own jobs list
-            fetchJobs();
-
-            setTimeout(() => {
-              router.push(`/analysis?job_id=${jobId}`);
-            }, 1500);
-          } else if (job.status === 'failed') {
-            setProgress({
-              stage: 'error',
-              message: 'Analysis failed',
-              activeAgents: [],
-              error: job.error || 'Analysis encountered an error'
-            });
-
-            if (pollInterval) {
-              clearInterval(pollInterval);
-              setPollInterval(null);
-            }
-
-            // Emit failure event
-            emitAnalysisFailed(jobId, job.error);
-
-            setIsAnalyzing(false);
-            setCurrentJobId(null);
-          }
-        }
-      } catch (error) {
-        console.error('Error checking job status:', error);
-      }
-    };
-
-    if (currentJobId && !pollInterval) {
-      const interval = setInterval(() => {
-        checkJobStatusLocal(currentJobId);
-      }, 2000);
-      setPollInterval(interval);
-    }
-
-    return () => {
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        setPollInterval(null);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentJobId, pollInterval, router]);
 
   const fetchJobs = async () => {
     try {
@@ -209,14 +186,7 @@ export default function AdvisorTeam() {
           message: 'Financial Planner coordinating analysis...',
           activeAgents: ['Financial Planner']
         });
-
-        setTimeout(() => {
-          setProgress({
-            stage: 'parallel',
-            message: 'Agents working in parallel...',
-            activeAgents: ['Portfolio Analyst', 'Chart Specialist', 'Retirement Planner']
-          });
-        }, 5000);
+        // WebSocket will push real-time status updates from here
       } else {
         throw new Error('Failed to start analysis');
       }
