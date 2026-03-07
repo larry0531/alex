@@ -86,7 +86,7 @@ export default function AdvisorTeam() {
     const checkJobStatusLocal = async (jobId: string) => {
       try {
         const token = await getToken();
-        const response = await fetch(`${API_URL}/api/jobs/${jobId}`, {
+        const response = await fetch(`${API_URL}/api/v1/jobs/${jobId}`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
@@ -160,7 +160,7 @@ export default function AdvisorTeam() {
   const fetchJobs = async () => {
     try {
       const token = await getToken();
-      const response = await fetch(`${API_URL}/api/jobs`, {
+      const response = await fetch(`${API_URL}/api/v1/jobs`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -185,7 +185,7 @@ export default function AdvisorTeam() {
 
     try {
       const token = await getToken();
-      const response = await fetch(`${API_URL}/api/analyze`, {
+      const response = await fetch(`${API_URL}/api/v1/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

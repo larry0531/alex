@@ -68,7 +68,7 @@ export default function Analysis() {
     const loadJob = async (jobId: string) => {
       try {
         const token = await getToken();
-        const response = await fetch(`${API_URL}/api/jobs/${jobId}`, {
+        const response = await fetch(`${API_URL}/api/v1/jobs/${jobId}`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
@@ -92,7 +92,7 @@ export default function Analysis() {
       try {
         const token = await getToken();
         // First, get the list of jobs to find the latest completed one
-        const response = await fetch(`${API_URL}/api/jobs`, {
+        const response = await fetch(`${API_URL}/api/v1/jobs`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
